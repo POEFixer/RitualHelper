@@ -1,6 +1,6 @@
 # Ritual Helper
 
-Current version: 1.5.5
+Current version: 1.5.6
 
 Requires POE2Fixer 364 or newer.
 

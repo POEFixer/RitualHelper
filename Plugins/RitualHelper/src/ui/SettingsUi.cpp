@@ -51,14 +51,6 @@ ImVec4 ReadableWarning() {
     return w;
 }
 
-// The Diagnostics card's own row, in the heading colour.
-bool DiagnosticsRow(const char* label) {
-    ImGui::PushStyleColor(ImGuiCol_Text, Ui::Colors().Accent);
-    const bool open = DisclosureRow(label);
-    ImGui::PopStyleColor();
-    return open;
-}
-
 std::string Trimmed(const std::string& s) {
     size_t b = 0, e = s.size();
     while (b < e && (s[b] == ' ' || s[b] == '\t')) ++b;
@@ -128,11 +120,7 @@ void RitualHelperPlugin::DrawSettings() {
     DrawSectionDiagnostics(*snap);
     ImGui::Spacing();
 
-    char footer[160];
-    std::snprintf(footer, sizeof(footer),
-                  "Ritual Helper %s - originally created by Omer Faruk ARPA, maintained by POEFixer. GPL-3.0.",
-                  PluginSDK_GetInfo()->version);
-    Ui::Hint(footer);
+    Ui::Hint("Originally created by Omer Faruk ARPA. Maintained by POEFixer. GPL-3.0.");
     ImGui::Spacing();
     ImGui::PopID();
     SaveIfDue(NowMs());
@@ -170,10 +158,10 @@ void RitualHelperPlugin::DrawSectionValue() {
     Settings& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##valueCard");
-    Ui::Heading(ICON_FA_COINS, "Defer by value");
-    Ui::HelpMarker("Also highlights every revealed reward worth at least this much, ticked or not.\n"
-                   "Values count the whole stack. Prices come from the overlay's price service: "
-                   "Settings > Prices chooses the league and the source.");
+    Ui::Heading(ICON_FA_COINS, "Defer by value",
+                "Also highlights every revealed reward worth at least this much, ticked or not.\n"
+                "Values count the whole stack. Prices come from the overlay's price service: "
+                "Settings > Prices chooses the league and the source.");
     const float fs = ImGui::GetFontSize();
     const ImGuiStyle& st = ImGui::GetStyle();
     const Ui::LabelColumn col({"Minimum value", "Show prices in"});
@@ -283,10 +271,10 @@ void RitualHelperPlugin::DrawSectionItems(const CatalogPrices* catalog, const Sc
     Ui::BeginCard("##itemsCard");
     char title[96];
     std::snprintf(title, sizeof(title), "Items to defer (%zu ticked)###itemsHeading", m_settings.selectedItems.size());
-    Ui::Heading(ICON_FA_LIST_CHECK, title);
-    Ui::HelpMarker("Ticked items are highlighted whenever they appear in the Favours window, priced or not.\n"
-                   "Names are matched as the game writes them. The list below is in English; with another game "
-                   "language, tick rewards under \"In the open Favours window\" instead.");
+    Ui::Heading(ICON_FA_LIST_CHECK, title,
+                "Ticked items are highlighted whenever they appear in the Favours window, priced or not.\n"
+                "Names are matched as the game writes them. The list below is in English; with another game "
+                "language, tick rewards under \"In the open Favours window\" instead.");
 
     // One field searches every category; a name the list does not know can be added as typed.
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -489,13 +477,8 @@ void RitualHelperPlugin::DrawCategories(const CatalogPrices* catalog) {
 }
 
 void RitualHelperPlugin::DrawSectionDiagnostics(const ScanSnapshot& snap) {
-    Ui::BeginCard("##diagCard");
-    const bool open = DiagnosticsRow(ICON_FA_BUG "  Diagnostics###diag");
-    Ui::Tip("Dry run, on-screen scan status and what the plugin sees of the Favours window.");
-    if (!open) {
-        Ui::EndCard();
+    if (!Ui::BeginDiagnostics("Dry run, on-screen scan status and what the plugin sees of the Favours window."))
         return;
-    }
     Settings& s = m_settings;
     bool changed = false;
     changed |= Ui::Check("Dry run (never click)", "dryRun", &s.dryRun,
@@ -581,7 +564,7 @@ void RitualHelperPlugin::DrawSectionDiagnostics(const ScanSnapshot& snap) {
             "in the plugin folder. Useful when the window or its buttons stop being recognised after a game patch.");
     const std::string dump = m_scanner.DumpResult();
     if (!dump.empty()) Ui::Hint(dump.c_str());
-    Ui::EndCard();
+    Ui::EndDiagnostics();
 }
 
 }  // namespace RitualHelper
