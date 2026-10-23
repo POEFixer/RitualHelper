@@ -18,7 +18,7 @@
 POEFIXER_PLUGIN_INFO(
     "RitualHelper",
     "Ritual Helper",
-    "1.5.7",
+    "1.5.8",
     "Omer Faruk ARPA, POEFixer",
     "Highlights the Ritual rewards you want in the Favours window, shows their prices and defers them all with one click.")
 
