@@ -181,4 +181,9 @@ void Settings::Select(const std::string& name, bool on) {
     if (!on && it != selectedItems.end()) selectedItems.erase(it);
 }
 
+void Settings::SelectReward(const std::string& english, const std::string& shown, bool on) {
+    Select(english, on);
+    if (!on) Select(shown, false);
+}
+
 }  // namespace RitualHelper

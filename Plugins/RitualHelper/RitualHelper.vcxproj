@@ -109,11 +109,13 @@
     <ClInclude Include="src\game\Category.h" />
     <ClInclude Include="src\game\DeferPlanner.h" />
     <ClInclude Include="src\game\DeferSequence.h" />
+    <ClInclude Include="src\game\LocText.h" />
     <ClInclude Include="src\game\RitualScanner.h" />
     <ClInclude Include="src\game\RitualTypes.h" />
     <ClInclude Include="src\game\Text.h" />
     <ClInclude Include="src\game\UiLocator.h" />
     <ClInclude Include="src\input\Win32Input.h" />
+    <ClInclude Include="src\ui\UiText.h" />
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginAbi.h" />
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginSDK.h" />
   </ItemGroup>

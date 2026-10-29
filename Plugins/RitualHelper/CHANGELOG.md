@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.9
+
+- Follows the program language (ten languages).
+- DEFER works in every game language (POEFixer 371 and later): the game's own "Defer Item" text is recognised in the game language, and the other button under the reward grid is taken for "Offer Tribute".
+- Rewards are matched to the item list and priced by their English name in every game language (POEFixer 371 and later), and unrevealed rewards are recognised in every game language.
+- Diagnostics show the button's text as the game writes it.
+- DEFER no longer waits in vain on a non-English client when a number or a short label sits just under the reward grid: the button found by its place is checked again until the game shows its "Defer Item" text on it.
+- Rewards ticked in the open Favours window under the game's own names (as 1.5.8 asked on a non-English client) are highlighted and deferred again; unticking such a reward there clears both its English and its game name.
+- A reward the program could not name yet (its item data still downloading) is named as soon as it can be, without reopening the Favours window.
+
 ## 1.5.8
 
 - Works with the separate menu window (POEFixer 366): the host hands the plugin the right drawing context for its settings tab and for its overlay.

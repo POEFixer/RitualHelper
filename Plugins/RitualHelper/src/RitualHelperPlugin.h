@@ -6,6 +6,7 @@
 #include "Settings.h"
 #include "game/DeferPlanner.h"
 #include "game/DeferSequence.h"
+#include "game/LocText.h"
 #include "game/RitualScanner.h"
 #include "input/Win32Input.h"
 
@@ -49,7 +50,8 @@ private:
     void MarkDirty() { m_dirty = true; }
     void SaveIfDue(int64_t nowMs);
     PriceInfo PriceFor(const std::string& name);
-    void FormatValue(char* out, size_t n, double totalExalt, double totalDivine) const;
+    // "12 ex" / "1.5 div" in the unit the settings show prices in (drawing thread).
+    std::string FormatValue(double totalExalt, double totalDivine) const;
     bool HasDivineRate() const;
 
     // ui/Overlay.cpp
@@ -69,7 +71,9 @@ private:
     void DrawWindowRewards(const ScanSnapshot& snap);
     void DrawSearchResults(const CatalogPrices* catalog);
     void DrawCategories(const CatalogPrices* catalog);
-    bool DrawItemRow(const char* name, const PriceInfo& price, int id);
+    // `name` is the item list's (English) name the tick goes by; `shown`, when given, the
+    // name the game shows for it (a reward of the open window in another game language).
+    bool DrawItemRow(const char* name, const PriceInfo& price, int id, const char* shown = nullptr);
     void DrawSectionClicking();
     void DrawSectionDiagnostics(const ScanSnapshot& snap);
     void EnsureCatalogKeys();
@@ -101,7 +105,7 @@ private:
     bool m_hwPressedOn = false;
     int64_t m_lastStartMs = 0;
     int64_t m_dryFlashUntil = 0;
-    std::string m_notice;            // short result shown next to the button
+    LocText m_notice;                // short result shown next to the button (translated when drawn)
     int64_t m_noticeUntil = 0;
 
     // Settings UI state.

@@ -1,6 +1,6 @@
 # Ritual Helper
 
-Current version: 1.5.8
+Current version: 1.5.9
 
 Requires POE2Fixer 364 or newer.
 
@@ -73,11 +73,16 @@ slipping by.
 
 ## Known limits
 
-- The game's buttons are recognised by their English text ("Offer Tribute",
-  "Defer Item"), so the DEFER button needs an English game client. Highlights work
-  in every language.
-- The item list is in English. With another game language, tick rewards under
-  *In the open Favours window*: names are matched as the game writes them.
+- The game's buttons are recognised by their text: with POEFixer 371 or later in
+  every game language (the game's own "Defer Item" text in the game language, and
+  the other button under the reward grid as "Offer Tribute"); an older POEFixer
+  needs an English game client for the DEFER button. Highlights work in every
+  language.
+- The item list is in English. With POEFixer 371 or later rewards are matched by
+  their English name in every game language (a reward ticked earlier under the game's
+  own name still counts); an older POEFixer matches them as the game writes them, so
+  tick rewards under *In the open Favours window* there.
+- Unrevealed rewards are recognised by their item path in every game language.
 - If the Favours window or its buttons stop being recognised after a game patch, use
   *Write discovery dump* under Diagnostics and attach the file to your report.
 
@@ -92,11 +97,12 @@ This repository is the plugin folder from the POE2Fixer source tree (`Plugins/Ri
 - `POEFixer/plugin_sdk/` - the POE2Fixer Plugin SDK v6 headers (`PluginAbi.h`, `PluginSDK.h`)
 - `POEFixer/imgui/` - the Dear ImGui sources the DLL compiles against
 - `POEFixer/core/` - small self-contained helper headers used by the plugin
+- `tools/plugin_i18n/gen.py` - the translation tool: after editing `Plugins/RitualHelper/lang/en.json` run `python tools/plugin_i18n/gen.py Plugins/RitualHelper` (it rewrites the embedded English header); `--gate` checks every language file and the keys the sources use
 
 1. Install Visual Studio 2022 with the "Desktop development with C++" workload (MSVC v143, Windows 10/11 SDK).
 2. Open `RitualHelper.sln`, select **Release | x64** and build the solution.
 3. The plugin is written to `x64\Release\Plugins\RitualHelper\RitualHelper.dll` (Release builds carry no debug information, see `Directory.Build.targets`).
-4. Copy `RitualHelper.dll` into `Plugins\RitualHelper\` next to the POE2Fixer executable.
+4. Copy `RitualHelper.dll` into `Plugins\RitualHelper\` next to the POE2Fixer executable, together with `Plugins\RitualHelper\lang` from this repository (same folder names).
 
 ## Credits
 

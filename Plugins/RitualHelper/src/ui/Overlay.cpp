@@ -5,6 +5,7 @@
 // Copyright (C) Omer Faruk ARPA and POEFixer contributors. Licensed under GPL-3.0 (see LICENSE).
 #include "../RitualHelperPlugin.h"
 #include "../../../../POEFixer/plugin_sdk/PluginUi.h"
+#include "UiText.h"
 
 #include "../../../../POEFixer/imgui/IconsFontAwesome6.h"
 
@@ -12,7 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
+#include <string>
 
 namespace RitualHelper {
 
@@ -86,7 +87,6 @@ void RitualHelperPlugin::DrawHighlights(const ScanSnapshot& snap, int64_t nowMs)
         ImVec4(m_settings.highlight[0], m_settings.highlight[1], m_settings.highlight[2], m_settings.highlight[3]));
     const float thick = flash ? 3.0f : 2.0f;
     constexpr float kGap = 2.0f;  // between the reward's cell and the frame
-    char val[32];
     for (const auto& m : m_matches) {
         if (m.reward >= snap.window.rewards.size()) continue;
         const ScreenRect& r = snap.window.rewards[m.reward].rect;
@@ -99,13 +99,13 @@ void RitualHelperPlugin::DrawHighlights(const ScanSnapshot& snap, int64_t nowMs)
         dl->AddRect(o0, o1, col, 3.0f, thick);
         const ImVec2 a(o0.x + thick, o0.y + thick);  // inner edge of the frame
         if (!m_settings.showValues || !m.priced) continue;
-        FormatValue(val, sizeof(val), m.totalExalt, m.totalDivine);
-        const ImVec2 ts = ImGui::CalcTextSize(val);
+        const std::string val = FormatValue(m.totalExalt, m.totalDivine);
+        const ImVec2 ts = ImGui::CalcTextSize(val.c_str());
         const float pad = Snap(fs * 0.2f);
         const ImVec2 p0(Snap(a.x), Snap(a.y));
         const ImVec2 p1(p0.x + Snap(ts.x) + pad * 2.f, p0.y + Snap(ts.y) + 2.f);
         dl->AddRectFilled(p0, p1, kPanelBg, fs * 0.2f);
-        PluginUi::TextOutlined(dl, ImVec2(p0.x + pad, p0.y + 1.f), col | IM_COL32_A_MASK, val);
+        PluginUi::TextOutlined(dl, ImVec2(p0.x + pad, p0.y + 1.f), col | IM_COL32_A_MASK, val.c_str());
     }
 }
 
@@ -114,10 +114,10 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
     const float fs = ImGui::GetFontSize();
 
     // Where the button lives: left of the hourglass, else above the grid's right edge.
-    char label[48];
-    std::snprintf(label, sizeof(label), "%s %s (%zu)", ICON_FA_HOURGLASS, m_settings.dryRun ? "DRY RUN" : "DEFER",
-                  m_matches.size());
-    const ImVec2 ts = ImGui::CalcTextSize(label);
+    const std::string label = std::string(ICON_FA_HOURGLASS " ") +
+                              (m_settings.dryRun ? I18n::Tr("button_dry_run") : I18n::Tr("button_defer")) + " (" +
+                              std::to_string(m_matches.size()) + ")";
+    const ImVec2 ts = ImGui::CalcTextSize(label.c_str());
     const ImVec2 size(Snap(ts.x + fs * 1.4f), Snap(ts.y + fs * 0.7f));
     const float gap = Snap(fs * 0.6f);
     ImVec2 pos;
@@ -134,9 +134,10 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
     // A running sequence: progress instead of the button.
     if (m_sequence.IsRunning()) {
         SetCapture(false);
-        char buf[96];
-        std::snprintf(buf, sizeof(buf), "Deferring %zu/%zu  -  right-click or Esc stops", m_sequence.Done(), m_sequence.Total());
-        DrawPill(ImVec2(p1.x, pos.y), buf, kTextWarn, true);
+        const std::string progress =
+            I18n::TrF("progress_deferring",
+                      { { "done", std::to_string(m_sequence.Done()) }, { "total", std::to_string(m_sequence.Total()) } });
+        DrawPill(ImVec2(p1.x, pos.y), progress.c_str(), kTextWarn, true);
         return;
     }
 
@@ -144,10 +145,10 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
     if (showNotice) {
         const SequenceOutcome o = m_sequence.Outcome();
         ImU32 c = kTextMain;
-        if (m_notice.rfind("Dry run", 0) == 0) c = kTextWarn;
+        if (m_notice.key.rfind("notice_dry_run", 0) == 0) c = kTextWarn;
         else if (o == SequenceOutcome::Done) c = kTextGood;
         else if (o == SequenceOutcome::Aborted || o == SequenceOutcome::Cancelled) c = kTextBad;
-        DrawPill(m_matches.empty() ? ImVec2(p1.x, pos.y) : under, m_notice.c_str(), c, true);
+        DrawPill(m_matches.empty() ? ImVec2(p1.x, pos.y) : under, ToText(m_notice).c_str(), c, true);
     }
 
     if (m_matches.empty()) {
@@ -157,13 +158,13 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
     // Defer mode can only be driven when the game's buttons were recognised.
     if (!snap.bottomFound || (!snap.toggleFound && snap.bottom != BottomMode::DeferItem)) {
         SetCapture(false);
-        if (!showNotice && !snap.note.empty()) DrawPill(ImVec2(p1.x, pos.y), snap.note.c_str(), kTextWarn, true);
+        if (!showNotice && !snap.note.empty()) DrawPill(ImVec2(p1.x, pos.y), ToText(snap.note).c_str(), kTextWarn, true);
         return;
     }
     // The overlay menu covers the game: the sequence would stop at once.
     if (ctx()->Game.IsMenuVisible()) {
         SetCapture(false);
-        if (!showNotice) DrawPill(ImVec2(p1.x, pos.y), "Close the overlay menu to defer", kTextMain, true);
+        if (!showNotice) DrawPill(ImVec2(p1.x, pos.y), I18n::Tr("pill_close_menu"), kTextMain, true);
         return;
     }
 
@@ -188,21 +189,21 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
                                    ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
     bool clicked = false;
     if (ImGui::Begin("##ritualhelper_defer", nullptr, flags)) {
-        char btn[64];
-        std::snprintf(btn, sizeof(btn), "%s###defer", label);
-        clicked = ImGui::Button(btn, size);
+        clicked = ImGui::Button((label + "###defer").c_str(), size);
         m_pressActive = ImGui::IsItemActive();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos(fs * 26.0f);
             if (m_settings.dryRun) {
-                ImGui::TextUnformatted("Dry run is on (Diagnostics): pressing this only lists the highlighted rewards in "
-                                       "the log. No clicks are sent.");
+                // The section is the kit's own Diagnostics card, named as the host names it.
+                const std::string tip = I18n::TrF(
+                    "tip_dry_run", { { "section", I18n::KitText("plugin_kit_diagnostics", "Diagnostics") } });
+                ImGui::TextUnformatted(tip.c_str());
             } else {
-                ImGui::Text("Defers the %zu highlighted reward%s: switches defer mode on, clicks each one and "
-                            "confirms.", m_matches.size(), m_matches.size() == 1 ? "" : "s");
+                const std::string tip = I18n::TrF("tip_defer", { { "count", std::to_string(m_matches.size()) } });
+                ImGui::TextUnformatted(tip.c_str());
                 ImGui::Spacing();
-                ImGui::TextUnformatted("Right-click, Esc or moving the mouse stops it.");
+                ImGui::TextUnformatted(I18n::Tr("tip_defer_stop"));
             }
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
@@ -220,17 +221,24 @@ void RitualHelperPlugin::DrawDeferButton(const ScanSnapshot& snap, int64_t nowMs
 }
 
 void RitualHelperPlugin::DrawScanStatusLine(const ScanSnapshot& snap) {
-    char buf[256];
-    const char* bottom = snap.bottom == BottomMode::DeferItem ? "Defer Item"
-                       : snap.bottom == BottomMode::OfferTribute ? "Offer Tribute" : "not found";
+    // The game's own button text as the game writes it (what the scanner matched).
+    const char* bottom = snap.bottom == BottomMode::None ? I18n::Tr("state_not_found")
+                       : !snap.bottomText.empty()        ? snap.bottomText.c_str()
+                       : snap.bottom == BottomMode::DeferItem ? "Defer Item"
+                                                              : "Offer Tribute";
+    // The plugin's name, then one text per value; the separators are code.
+    std::string line = std::string(kPluginName) + ": ";
     if (snap.windowOpen) {
-        std::snprintf(buf, sizeof(buf), "Ritual Helper: %zu rewards, %zu highlighted | button: %s | hourglass: %s",
-                      snap.window.rewards.size(), m_matches.size(), bottom, snap.toggleFound ? "found" : "not found");
+        line += I18n::TrF("scanline_rewards", { { "rewards", std::to_string(snap.window.rewards.size()) },
+                                                { "highlighted", std::to_string(m_matches.size()) } }) +
+                " | " + I18n::TrF("scanline_button", { { "state", bottom } }) + " | " +
+                I18n::TrF("scanline_hourglass",
+                          { { "state", snap.toggleFound ? I18n::Tr("state_found") : I18n::Tr("state_not_found") } });
     } else {
-        std::snprintf(buf, sizeof(buf), "Ritual Helper: no Favours window open");
+        line += I18n::Tr("scanline_no_window");
     }
     const float fs = ImGui::GetFontSize();
-    DrawPill(ImVec2(fs, fs * 4.0f), buf, IM_COL32(150, 220, 255, 255), false);
+    DrawPill(ImVec2(fs, fs * 4.0f), line.c_str(), IM_COL32(150, 220, 255, 255), false);
 }
 
 }  // namespace RitualHelper

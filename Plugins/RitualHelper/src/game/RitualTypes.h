@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace RitualHelper {
@@ -21,10 +22,51 @@ struct ScreenRect {
 // One reward in the Favours window.
 struct RitualReward {
     std::string name;      // unique name for uniques, else the base type (localized, UTF-8)
+    // The English name the host prices the item by (LookupPriceByItem, desktop 371+): the item
+    // list and prices match by it in every game language. Empty on an older host or when the
+    // host could not name it: `name` is used then.
+    std::string englishName;
+    std::string path;      // Metadata/Items/... (ASCII id)
     bool  unique = false;  // Rarity == Unique
     int   stack = 1;
     int   slotX = 0, slotY = 0;
     ScreenRect rect;
+};
+
+// The name a reward is matched and priced by: its English identity name, else the shown name.
+inline const std::string& IdentityName(const RitualReward& r) {
+    return r.englishName.empty() ? r.name : r.englishName;
+}
+
+// The English identity names of the open window's rewards, by item address (the same path
+// and shown name: an address the game reused names another item). Only a name the host gave
+// is kept: a reward it could not name (its item data still downloading) is asked again on
+// the next read, never remembered unnamed.
+class EnglishNameCache {
+public:
+    static constexpr size_t kMax = 512;
+
+    const std::string* Find(uintptr_t address, const std::string& path, const std::string& shown) const {
+        const auto it = m_names.find(address);
+        if (it == m_names.end() || it->second.path != path || it->second.shown != shown) return nullptr;
+        return &it->second.english;
+    }
+    void Store(uintptr_t address, const std::string& path, const std::string& shown, const std::string& english) {
+        if (english.empty()) {
+            m_names.erase(address);
+            return;
+        }
+        if (m_names.size() >= kMax && m_names.find(address) == m_names.end()) m_names.clear();
+        m_names[address] = Entry{ path, shown, english };
+    }
+    void Clear() { m_names.clear(); }
+    size_t Size() const { return m_names.size(); }
+
+private:
+    struct Entry {
+        std::string path, shown, english;
+    };
+    std::unordered_map<uintptr_t, Entry> m_names;
 };
 
 // The open Favours window: its reward grid and the rewards on it.

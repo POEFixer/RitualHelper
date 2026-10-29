@@ -66,11 +66,13 @@ void RitualScanner::Start(const PluginSDK::Context* ctx) {
     m_wasOpen = false;
     m_lastInventoryAt = 0;
     m_lastWalkAt = 0;
+    m_lastSearchAt = 0;
+    m_englishNames.Clear();
     {
         std::lock_guard<std::mutex> lk(m_pubMutex);
         m_latest = std::make_shared<const ScanSnapshot>();
         m_dumpRequest.clear();
-        m_dumpResult.clear();
+        m_dumpResult = {};
     }
     m_thread = std::thread([this] { Loop(); });
 }
@@ -101,7 +103,7 @@ void RitualScanner::RequestDump(const std::filesystem::path& file) {
     {
         std::lock_guard<std::mutex> lk(m_pubMutex);
         m_dumpRequest = file;
-        m_dumpResult = "Writing...";
+        m_dumpResult = Loc::Key("dump_writing");
     }
     RequestScanNow();
 }
@@ -116,7 +118,7 @@ std::shared_ptr<const CatalogPrices> RitualScanner::Catalog() const {
     return m_catalog;
 }
 
-std::string RitualScanner::DumpResult() const {
+LocText RitualScanner::DumpResult() const {
     std::lock_guard<std::mutex> lk(m_pubMutex);
     return m_dumpResult;
 }
@@ -177,6 +179,7 @@ void RitualScanner::Iteration() {
             }
             return;
         }
+        RefreshDeferText();
 
         const int interval = std::clamp(m_intervalMs.load(), 100, 5000);
         const int64_t every = fast ? kFastInventoryMs : (m_wasOpen ? interval : std::max(interval, kIdleInventoryMs));
@@ -195,8 +198,10 @@ void RitualScanner::Iteration() {
                 m_work.window = {};
                 m_work.bottomFound = false;
                 m_work.bottom = BottomMode::None;
+                m_work.bottomText.clear();
                 m_work.toggleFound = false;
-                m_work.note = "No Favours window open.";
+                m_work.note = Loc::Key("note_no_window");
+                m_englishNames.Clear();
                 if (changed || m_work.seq == 0) Publish(m_work);
                 return;
             }
@@ -210,21 +215,25 @@ void RitualScanner::Iteration() {
         }
         if (!m_wasOpen) return;
 
-        const bool allFound = PollCached(m_work.window, m_work);
-        const bool walkDue = NowMs() - m_lastWalkAt >= m_walkBackoffMs;
+        PollCached(m_work.window, m_work);
+        const int64_t polledAt = NowMs();
         // A lost bottom button inside a known panel is looked up again at once (a small
-        // walk): the game may swap the button when defer mode toggles. Whole-tree
-        // searches stay rate-limited.
-        const bool quickPanel = !m_work.bottomFound && m_cached.panel != 0;
-        if (!allFound && (walkDue || quickPanel)) {
-            Locate(m_work.window, m_work, walkDue);
-            if (walkDue) {
-                m_lastWalkAt = NowMs();
+        // walk): the game may swap the button when defer mode toggles. A button known only
+        // by its place is looked up again too (PlanButtonSearch). Whole-tree searches stay
+        // rate-limited.
+        const ButtonSearch plan =
+            PlanButtonSearch(m_work.bottomFound, m_cached.bottomByPlace, m_work.toggleFound, m_cached.panel != 0,
+                             polledAt - m_lastWalkAt >= m_walkBackoffMs, fast, polledAt - m_lastSearchAt);
+        if (plan.search) {
+            Locate(m_work.window, m_work, plan.allowFull);
+            m_lastSearchAt = NowMs();
+            if (plan.allowFull) {
+                m_lastWalkAt = m_lastSearchAt;
                 // Nothing recognisable (for example a non-English client): look less often.
                 m_walkBackoffMs = m_work.bottomFound ? 1500 : std::min(m_walkBackoffMs * 2, 12000);
             }
         }
-        if (m_work.bottomFound && m_work.toggleFound) m_work.note.clear();
+        if (m_work.bottomFound && m_work.toggleFound) m_work.note = {};
         Publish(m_work);
     } catch (const std::exception&) {
         m_cached = {};
@@ -258,6 +267,8 @@ bool RitualScanner::ReadWindow(RitualWindow& out) {
         const int ih = std::clamp(it.Height, 1, out.boxesY - it.SlotY);
         RitualReward r;
         r.name = !it.UniqueName.empty() ? it.UniqueName : it.BaseTypeName;
+        r.path = it.Path;
+        r.englishName = EnglishNameOf(it, r.name);
         r.unique = it.Rarity == 3;
         r.stack = std::max(1, it.StackCount);
         r.slotX = it.SlotX;
@@ -294,21 +305,31 @@ bool RectOf(const PluginSDK::Context* ctx, uintptr_t addr, ScreenRect& r) {
 
 }  // namespace
 
-bool RitualScanner::PollCached(const RitualWindow& w, ScanSnapshot& s) {
+void RitualScanner::PollCached(const RitualWindow& w, ScanSnapshot& s) {
     const int64_t now = NowMs();
     bool bottomOk = false;
     if (m_cached.bottom && VisibleChain(m_ctx, m_cached.bottom)) {
-        const BottomMode mode = ClassifyBottomText(m_ctx->Ui.GetText(m_cached.bottom));
+        std::string text = m_ctx->Ui.GetText(m_cached.bottom);
+        const BottomMode mode = ClassifyPlacedBottomText(text, m_deferText);
         ScreenRect r;
         if (mode != BottomMode::None && RectOf(m_ctx, m_cached.bottom, r) && BottomButtonPlausible(r, w)) {
             bottomOk = true;
+            // A text recognised on the button proves the pick, from now on.
+            if (ClassifyBottomText(text, m_deferText) != BottomMode::None) m_cached.bottomByPlace = false;
             s.bottom = mode;
+            s.bottomText = std::move(text);
             s.bottomRect = r;
         }
     }
-    if (!bottomOk) m_cached.bottom = 0;
+    if (!bottomOk) {
+        m_cached.bottom = 0;
+        m_cached.bottomByPlace = false;
+    }
     s.bottomFound = bottomOk;
-    if (!bottomOk) s.bottom = BottomMode::None;
+    if (!bottomOk) {
+        s.bottom = BottomMode::None;
+        s.bottomText.clear();
+    }
     s.buttonPollSeq = ++m_buttonSeq;
     s.buttonPolledMs = now;
 
@@ -324,7 +345,6 @@ bool RitualScanner::PollCached(const RitualWindow& w, ScanSnapshot& s) {
     }
     if (!toggleOk) m_cached.toggle = 0;
     s.toggleFound = toggleOk;
-    return bottomOk && toggleOk;
 }
 
 void RitualScanner::Walk(uintptr_t root, int budget, bool leaves, std::vector<UiCandidate>& out, int& visited) {
@@ -393,9 +413,10 @@ void RitualScanner::Locate(const RitualWindow& w, ScanSnapshot& s, bool allowFul
         Walk(root, budget, false, cands, visited);
         std::vector<UiCandidate> texted;
         for (const auto& c : cands)
-            if (!c.text.empty() && ClassifyBottomText(c.text) != BottomMode::None) texted.push_back(c);
+            if (!c.text.empty() && (!m_deferText.empty() || ClassifyBottomText(c.text) != BottomMode::None))
+                texted.push_back(c);
         FillRects(texted);
-        return PickBottomButton(texted, w);
+        return PickBottomButton(texted, w, m_deferText);
     };
     BottomPick bottom;
     if (m_cached.panel) bottom = findBottom(m_cached.panel, kPanelWalkBudget);
@@ -408,8 +429,10 @@ void RitualScanner::Locate(const RitualWindow& w, ScanSnapshot& s, bool allowFul
 
     if (bottom.element) {
         m_cached.bottom = bottom.element->addr;
+        m_cached.bottomByPlace = bottom.byPlace;
         s.bottomFound = true;
         s.bottom = bottom.mode;
+        s.bottomText = bottom.element->text;
         s.bottomRect = bottom.element->rect;
         s.buttonPollSeq = ++m_buttonSeq;
         s.buttonPolledMs = NowMs();
@@ -438,11 +461,12 @@ void RitualScanner::Locate(const RitualWindow& w, ScanSnapshot& s, bool allowFul
             }
             if (!m_cached.panel) m_cached.panel = FindPanel(bottom.element->addr, w);
         }
-        s.note = s.toggleFound ? std::string() : "The defer hourglass was not found (defer mode must be switched on by hand).";
+        s.note = s.toggleFound ? LocText() : LocText(Loc::Key("note_no_hourglass"));
     } else {
         s.bottomFound = false;
         s.bottom = BottomMode::None;
-        s.note = "Favours window found, but its buttons were not recognised (an English game client is needed).";
+        s.bottomText.clear();
+        s.note = Loc::Key("note_buttons_unknown");
     }
     s.lastWalkNodes = visited;
     s.lastWalkMs = static_cast<float>(NowMs() - t0);
@@ -455,6 +479,23 @@ void RitualScanner::Publish(ScanSnapshot s) {
     auto p = std::make_shared<const ScanSnapshot>(std::move(s));
     std::lock_guard<std::mutex> lk(m_pubMutex);
     m_latest = std::move(p);
+}
+
+void RitualScanner::RefreshDeferText() {
+    const uint64_t revision = m_ctx->Lang.GameLanguage().revision;
+    if (revision == m_deferTextRevision && !m_deferText.empty()) return;
+    m_deferTextRevision = revision;
+    m_deferText = m_ctx->Lang.GameString("RitualRewardWindowPrepayButton");
+}
+
+std::string RitualScanner::EnglishNameOf(const PluginSDK::InventoryItem& item, const std::string& shown) {
+    if (!item.Address || !m_ctx->Prices.CanLookupByItem()) return {};
+    if (const std::string* known = m_englishNames.Find(item.Address, item.Path, shown)) return *known;
+    std::string english;
+    m_ctx->Prices.LookupPriceByItem(item.Address, &english);
+    // "" (the host could not name it yet) is not kept: the next read asks again.
+    m_englishNames.Store(item.Address, item.Path, shown, english);
+    return english;
 }
 
 void RitualScanner::MaybeRebuildCatalog() {
@@ -531,12 +572,13 @@ void RitualScanner::WriteDumpNow(const std::filesystem::path& file) {
         if (shown == 0) s += "(none)\r\n";
     }
 
-    std::string result;
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
-    if (FileIO::AtomicWrite(file, s)) result = "Saved to " + PathToUtf8(file);
-    else result = "Could not write " + PathToUtf8(file);
-    if (m_ctx) m_ctx->Log.Info(("[Ritual Helper] " + result).c_str());
+    const std::string where = PathToUtf8(file);
+    const bool saved = FileIO::AtomicWrite(file, s);
+    // The log stays English; the settings tab shows the outcome in the program language.
+    if (m_ctx) m_ctx->Log.Info(((saved ? "[Ritual Helper] Saved to " : "[Ritual Helper] Could not write ") + where).c_str());
+    LocText result(saved ? Loc::Key("dump_saved") : Loc::Key("dump_failed"), { { "path", where } });
     std::lock_guard<std::mutex> lk(m_pubMutex);
     m_dumpResult = std::move(result);
 }

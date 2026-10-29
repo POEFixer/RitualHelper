@@ -8,17 +8,27 @@
 // terms of the GNU General Public License as published by the Free Software
 // Foundation, either version 3 of the License, or (at your option) any later version.
 // It is distributed WITHOUT ANY WARRANTY; see the LICENSE file for details.
+//
+// Texts follow the program language (PluginI18n.h): lang/<code>.json next to the DLL, English
+// compiled in through lang_en.generated.h (python tools/plugin_i18n/gen.py Plugins/RitualHelper
+// after editing lang/en.json). Reward names and the game's button texts stay as the game writes them.
+#include "../../../POEFixer/plugin_sdk/PluginSDK.h"
+#include "lang_en.generated.h"   // the embedded English: once per DLL, after PluginSDK.h
+
 #include "RitualHelperPlugin.h"
+#include "ui/UiText.h"
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
+#include <cstring>
+#include <iterator>
+#include <string>
 
 // Plugin info: the host checks it before CreatePlugin; the publish tool reads it.
 POEFIXER_PLUGIN_INFO(
     "RitualHelper",
     "Ritual Helper",
-    "1.5.8",
+    "1.5.9",
     "Omer Faruk ARPA, POEFixer",
     "Highlights the Ritual rewards you want in the Favours window, shows their prices and defers them all with one click.")
 
@@ -33,6 +43,21 @@ namespace {
 int64_t NowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// A LocText in English, for the file log (logs stay English whatever the program language):
+// the embedded English of lang_en.generated.h, sorted by key.
+const char* EnglishOf(const char* key) {
+    const auto* first = std::begin(kPluginLangEn);
+    const auto* last = std::end(kPluginLangEn);
+    const auto* it = std::lower_bound(first, last, key, [](const PluginSDK::I18n::Entry& e, const char* k) {
+        return std::strcmp(e.key, k) < 0;
+    });
+    return it != last && std::strcmp(it->key, key) == 0 ? it->text : key;
+}
+
+std::string EnglishText(const LocText& t) {
+    return RenderLocText(t, [](const char* key) { return EnglishOf(key); });
 }
 
 }  // namespace
@@ -79,7 +104,7 @@ void RitualHelperPlugin::OnEnable(bool) {
 }
 
 void RitualHelperPlugin::OnDisable() {
-    m_sequence.Cancel(NowMs(), m_input, "Stopped: plugin disabled");
+    m_sequence.Cancel(NowMs(), m_input, Loc::Key("status_disabled"));
     m_scanner.Stop();
     SetCapture(false);
     m_matches.clear();
@@ -111,12 +136,13 @@ bool RitualHelperPlugin::HasDivineRate() const {
     return ctx()->Prices.GetRates().divineInChaos > 0.0f;
 }
 
-void RitualHelperPlugin::FormatValue(char* out, size_t n, double ex, double div) const {
+std::string RitualHelperPlugin::FormatValue(double ex, double div) const {
     if (m_settings.priceDisplayUnit == 1 && div > 0.0) {
-        std::snprintf(out, n, div >= 100.0 ? "%.0f div" : (div >= 10.0 ? "%.1f div" : "%.2f div"), div);
-    } else {
-        std::snprintf(out, n, ex >= 10.0 ? "%.0f ex" : (ex >= 1.0 ? "%.1f ex" : "%.2f ex"), ex);
+        const std::string amount = div >= 100.0 ? Num("%.0f", div) : (div >= 10.0 ? Num("%.1f", div) : Num("%.2f", div));
+        return I18n::TrF("value_div", { { "amount", amount } });
     }
+    const std::string amount = ex >= 10.0 ? Num("%.0f", ex) : (ex >= 1.0 ? Num("%.1f", ex) : Num("%.2f", ex));
+    return I18n::TrF("value_ex", { { "amount", amount } });
 }
 
 void RitualHelperPlugin::EnsureSelectedKeys() {
@@ -168,7 +194,7 @@ void RitualHelperPlugin::TickSequence(int64_t nowMs) {
         m_scanner.RequestScanNow();
         m_notice = m_sequence.Status();
         m_noticeUntil = nowMs + 4000;
-        ctx()->Log.Info(("[Ritual Helper] " + m_notice).c_str());
+        ctx()->Log.Info(("[Ritual Helper] " + EnglishText(m_notice)).c_str());
     }
 }
 
@@ -196,24 +222,26 @@ void RitualHelperPlugin::StartDefer(const ScanSnapshot& snapRef, int64_t nowMs) 
         std::string names;
         for (const DeferMatch* m : order) {
             if (!names.empty()) names += ", ";
-            names += snap->window.rewards[m->reward].name;
+            names += IdentityName(snap->window.rewards[m->reward]);  // the log stays English
         }
         ctx()->Log.Info(("[Ritual Helper] Dry run - would defer: " + names).c_str());
         m_dryFlashUntil = nowMs + 3000;
-        char buf[96];
-        std::snprintf(buf, sizeof(buf), "Dry run: would defer %zu item%s", order.size(), order.size() == 1 ? "" : "s");
-        m_notice = buf;
+        m_notice = order.size() == 1
+                       ? LocText(Loc::Key("notice_dry_run_one"))
+                       : LocText(Loc::Key("notice_dry_run"), { { "count", std::to_string(order.size()) } });
         m_noticeUntil = nowMs + 4000;
         return;
     }
     if (!snap->bottomFound) {
-        m_notice = "The ritual buttons are not recognised";
+        m_notice = Loc::Key("notice_buttons_unknown");
         m_noticeUntil = nowMs + 4000;
         return;
     }
     const bool already = snap->bottom == BottomMode::DeferItem;
     if (!already && !snap->toggleFound) {
-        m_notice = "Hourglass not found: switch defer mode on, then press DEFER";
+        // The button's word is a key: the notice is worded when drawn (it may outlive a
+        // language switch).
+        m_notice = LocText(Loc::Key("notice_no_hourglass"), {}, { { "button", Loc::Key("button_defer") } });
         m_noticeUntil = nowMs + 5000;
         return;
     }
@@ -223,7 +251,7 @@ void RitualHelperPlugin::StartDefer(const ScanSnapshot& snapRef, int64_t nowMs) 
     for (const DeferMatch* m : order) rects.push_back(snap->window.rewards[m->reward].rect);
     m_input.SetGameWindow(ctx()->Game.GetGameWindow());
     m_scanner.SetFastPoll(true);
-    m_notice.clear();
+    m_notice = {};
     m_sequence.Start(nowMs, already, snap->toggleRect, std::move(rects), m_settings.clickPauseMs, m_input);
 }
 

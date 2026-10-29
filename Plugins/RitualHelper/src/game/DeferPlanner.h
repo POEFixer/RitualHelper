@@ -7,6 +7,7 @@
 #include "Text.h"
 
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -37,10 +38,24 @@ struct DeferMatch {
     double totalDivine = 0.0;
 };
 
+// The base item of an unrevealed reward ("Hidden Item"; F13): the same path in every game
+// language.
+inline constexpr std::string_view kHiddenItemPathPrefix = "Metadata/Items/MicrotransactionCurrency/HiddenItem";
+
 // Unrevealed rewards cannot be identified; spending tribute on them blindly is the
-// player's call, so they are never deferred automatically.
+// player's call, so they are never deferred automatically. Known by their path in any game
+// language; the English name stays a fallback for a reward read without one.
 inline bool IsHiddenReward(const RitualReward& r) {
+    if (r.path.rfind(kHiddenItemPathPrefix, 0) == 0) return true;
     return r.name.empty() || r.name == "Hidden Item";
+}
+
+// Whether the player ticked this reward (`keys`: NameKey()s of the ticked names): under its
+// English identity name, the item list's, or under the name the game shows (a tick made in the
+// open Favours window by 1.5.8, which stored the game's name on a non-English client).
+inline bool IsRewardTicked(const RitualReward& r, const std::unordered_set<std::string>& keys) {
+    if (keys.count(NameKey(IdentityName(r))) != 0) return true;
+    return !r.englishName.empty() && keys.count(NameKey(r.name)) != 0;
 }
 
 // A price usable for this reward: a unique-item price only for a unique reward (the
@@ -60,9 +75,12 @@ std::vector<DeferMatch> MatchDeferItems(const RitualWindow& win, const DeferRule
 
         DeferMatch m;
         m.reward = i;
-        m.selected = rules.selectedKeys && rules.selectedKeys->count(NameKey(r.name)) != 0;
+        // The item list holds English names: match and price by the English identity name (a
+        // tick under the game's own name counts too).
+        const std::string& identity = IdentityName(r);
+        m.selected = rules.selectedKeys && IsRewardTicked(r, *rules.selectedKeys);
 
-        const PriceInfo p = UsablePrice(r, priceOf(r.name));
+        const PriceInfo p = UsablePrice(r, priceOf(identity));
         const double stack = r.stack > 1 ? static_cast<double>(r.stack) : 1.0;
         if (p.found) {
             m.priced = true;

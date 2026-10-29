@@ -3,6 +3,7 @@
 // Copyright (C) Omer Faruk ARPA and POEFixer contributors. Licensed under GPL-3.0 (see LICENSE).
 #pragma once
 
+#include "LocText.h"
 #include "RitualTypes.h"
 #include "../PriceBook.h"
 
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace RitualHelper {
@@ -34,6 +36,7 @@ struct ScanSnapshot {
     // The button under the grid ("Offer Tribute" / "Defer Item").
     bool       bottomFound = false;
     BottomMode bottom = BottomMode::None;
+    std::string bottomText;          // the button's text as the game shows it (diagnostics)
     ScreenRect bottomRect;
     uint64_t   buttonPollSeq = 0;    // increases with every read of the bottom button
     int64_t    buttonPolledMs = 0;
@@ -47,7 +50,7 @@ struct ScanSnapshot {
     float       lastWalkMs = 0.f;
     int         walks = 0;
     float       lastInventoryMs = 0.f;
-    std::string note;                // why something is missing, plain English
+    LocText     note;                // why something is missing (a key: the drawing code translates it)
 };
 
 class RitualScanner {
@@ -74,11 +77,15 @@ public:
 
     std::shared_ptr<const ScanSnapshot> Latest() const;
     std::shared_ptr<const CatalogPrices> Catalog() const;
-    std::string DumpResult() const;
+    // The last dump's outcome (a key and its {path}); empty before the first request.
+    LocText DumpResult() const;
 
 private:
     struct Cached {
         uintptr_t panel = 0, bottom = 0, toggle = 0;
+        // The bottom button was taken by its place alone (BottomPick::byPlace): provisional
+        // until a text the scanner recognises names it.
+        bool bottomByPlace = false;
     };
 
     void Loop();
@@ -87,13 +94,15 @@ private:
 
     bool SleepFor(int ms);  // false when stopping
     bool ReadWindow(RitualWindow& out);
-    bool PollCached(const RitualWindow& w, ScanSnapshot& s);
+    void PollCached(const RitualWindow& w, ScanSnapshot& s);
     void Locate(const RitualWindow& w, ScanSnapshot& s, bool allowFull);
     void Walk(uintptr_t root, int budget, bool leaves, std::vector<UiCandidate>& out, int& visited);
     void FillRects(std::vector<UiCandidate>& items);
     uintptr_t FindPanel(uintptr_t from, const RitualWindow& w);
     void Publish(ScanSnapshot s);
     void MaybeRebuildCatalog();
+    void RefreshDeferText();
+    std::string EnglishNameOf(const PluginSDK::InventoryItem& item, const std::string& shown);
     void WriteDumpNow(const std::filesystem::path& file);
 
     const PluginSDK::Context* m_ctx = nullptr;
@@ -111,7 +120,7 @@ private:
     std::shared_ptr<const ScanSnapshot> m_latest;
     std::shared_ptr<const CatalogPrices> m_catalog;
     std::filesystem::path m_dumpRequest;
-    std::string m_dumpResult;
+    LocText m_dumpResult;
 
     // Scanner-thread state.
     Cached   m_cached;
@@ -120,9 +129,18 @@ private:
     uint64_t m_areaCounter = 0;
     int64_t  m_lastInventoryAt = 0;
     int64_t  m_lastWalkAt = 0;
+    int64_t  m_lastSearchAt = 0;     // the last Locate, whole tree or panel only
     int      m_walkBackoffMs = 1500;
     bool     m_wasOpen = false;
     ScanSnapshot m_work;             // the snapshot being kept up to date
+    // The game's "Defer Item" button text in the game language (GameString
+    // RitualRewardWindowPrepayButton, desktop 371+; "" = unknown) and the game-language
+    // revision it was read at.
+    std::string m_deferText;
+    uint64_t    m_deferTextRevision = ~0ull;
+    // English identity names of the open window's rewards (LookupPriceByItem); forgotten
+    // when the window closes. A reward the host could not name is asked again.
+    EnglishNameCache m_englishNames;
     int      m_walkCount = 0;
 };
 

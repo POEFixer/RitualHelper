@@ -7,18 +7,53 @@
 #include "Text.h"
 
 #include <cmath>
+#include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace RitualHelper {
 
-// The button under the reward grid reads "Offer Tribute" normally and "Defer Item"
-// while defer mode is on. The game shows these texts in the client's language, so
-// only an English client is recognised; the click sequence never starts without it.
-inline BottomMode ClassifyBottomText(const std::string& text) {
+// The button under the reward grid reads "Offer Tribute" normally and "Defer Item" while
+// defer mode is on, in the client's language. "Defer Item" is recognised by its text: the
+// game's own RitualRewardWindowPrepayButton text in the game language (`deferText`, from the
+// host's GameString on desktop 371+) or the English words. "Offer Tribute" is in no balance
+// table (F13): the English words name it here, and on a client whose defer text is known
+// PickBottomButton / ClassifyPlacedBottomText take another text on the button's place for
+// it. Such a pick by place is provisional (BottomPick::byPlace, PlanButtonSearch): the
+// scanner keeps looking until a text it recognises names the button. Without either the
+// click sequence never starts (rewards are only ever clicked while the button reads Defer
+// Item).
+inline BottomMode ClassifyBottomText(const std::string& text, const std::string& deferText = {}) {
+    if (!deferText.empty() && ContainsCI(text, deferText)) return BottomMode::DeferItem;
     if (ContainsCI(text, "defer item")) return BottomMode::DeferItem;
     if (ContainsCI(text, "offer tribute")) return BottomMode::OfferTribute;
     return BottomMode::None;
+}
+
+// Whether a text can be a button's label: it holds a letter (any non-ASCII character counts
+// as one), not only digits, spaces and punctuation (a count "12" or "3/10" never is).
+inline bool HasLetter(std::string_view text) {
+    for (const char ch : text) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c >= 0x80 || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return true;
+    }
+    return false;
+}
+
+// A text already at the button's place (BottomButtonPlausible): recognised as above, else,
+// when the defer text is known, Offer Tribute (another text there that can be a label).
+inline BottomMode ClassifyPlacedBottomText(const std::string& text, const std::string& deferText) {
+    const BottomMode mode = ClassifyBottomText(text, deferText);
+    if (mode != BottomMode::None || deferText.empty()) return mode;
+    return HasLetter(text) ? BottomMode::OfferTribute : BottomMode::None;
+}
+
+// Shaped like the button: at least one and a half cells wide and wider than tall. A text
+// picked by place prefers this shape (a short label just under the grid is not the button);
+// a short translated label on the button itself still counts when nothing else is there.
+inline bool ButtonShaped(const ScreenRect& r, const RitualWindow& w) {
+    return r.w >= 1.5f * w.cellSize && r.w >= r.h;
 }
 
 // Geometry is judged relative to the grid's cell size so it holds at every resolution
@@ -61,25 +96,69 @@ inline bool DeferTogglePlausible(const UiCandidate& e, const RitualWindow& w) {
 struct BottomPick {
     std::optional<UiCandidate> element;
     BottomMode mode = BottomMode::None;
+    // Taken for the button by its place alone (no text recognised it): provisional.
+    bool byPlace = false;
 };
 
-// The texted element under the grid closest to its bottom edge.
-inline BottomPick PickBottomButton(const std::vector<UiCandidate>& all, const RitualWindow& w) {
-    BottomPick best;
-    float bestDist = 1e30f;
+// The texted element under the grid closest to its bottom edge: a recognised text first;
+// only when none is recognised and the defer text is known, another text there that can be
+// a label (Offer Tribute in the client's language, F13), a button-shaped one before a
+// closer one that is not. That last pick is by place only (byPlace).
+inline BottomPick PickBottomButton(const std::vector<UiCandidate>& all, const RitualWindow& w,
+                                   const std::string& deferText = {}) {
     const float gridBottom = w.gridY + w.GridH();
-    for (const auto& e : all) {
-        if (e.text.empty()) continue;
-        const BottomMode mode = ClassifyBottomText(e.text);
-        if (mode == BottomMode::None || !BottomButtonPlausible(e.rect, w)) continue;
-        const float d = std::fabs(e.rect.y - gridBottom);
-        if (d < bestDist) {
-            bestDist = d;
-            best.element = e;
-            best.mode = mode;
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 1 && deferText.empty()) break;
+        BottomPick best;
+        float bestDist = 1e30f;
+        bool bestShaped = false;
+        for (const auto& e : all) {
+            if (e.text.empty()) continue;
+            const BottomMode mode =
+                pass == 0 ? ClassifyBottomText(e.text, deferText) : ClassifyPlacedBottomText(e.text, deferText);
+            if (mode == BottomMode::None || !BottomButtonPlausible(e.rect, w)) continue;
+            const float d = std::fabs(e.rect.y - gridBottom);
+            const bool shaped = pass == 1 && ButtonShaped(e.rect, w);
+            const bool better = !best.element || (shaped != bestShaped ? shaped : d < bestDist);
+            if (better) {
+                bestDist = d;
+                bestShaped = shaped;
+                best.element = e;
+                best.mode = mode;
+                best.byPlace = pass == 1;
+            }
         }
+        if (best.element) return best;
     }
-    return best;
+    return {};
+}
+
+// A button taken by its place alone is checked again while the click sequence runs (fast
+// polling): the remembered panel is searched every kPlacedRecheckMs, so the real button wins
+// as soon as it shows the defer text (a wrong pick never reads it, and the sequence would
+// wait for it in vain).
+inline constexpr int64_t kPlacedRecheckMs = 250;
+
+struct ButtonSearch {
+    bool search = false;     // look for the buttons in this iteration
+    bool allowFull = false;  // the whole UI tree may be walked (else the remembered panel only)
+};
+
+// Whether the scanner looks for the window's buttons in this iteration. Never while both are
+// known for good; a button known only by its place does not count as found (byPlace). A
+// search is made when the regular one is due (`walkDue`, whole tree allowed), and in the
+// remembered panel at once after the button was lost, or every kPlacedRecheckMs during the
+// click sequence while the button is known by its place only.
+inline ButtonSearch PlanButtonSearch(bool bottomFound, bool bottomByPlace, bool toggleFound, bool panelKnown,
+                                     bool walkDue, bool fastPoll, int64_t sinceLastSearchMs) {
+    const bool allFound = bottomFound && !bottomByPlace && toggleFound;
+    if (allFound) return {};
+    const bool recheck = bottomFound && bottomByPlace && fastPoll && sinceLastSearchMs >= kPlacedRecheckMs;
+    const bool quickPanel = panelKnown && (!bottomFound || recheck);
+    ButtonSearch plan;
+    plan.search = walkDue || quickPanel;
+    plan.allowFull = walkDue;
+    return plan;
 }
 
 // The hourglass (defer toggle): a square icon above the grid's right half; the one

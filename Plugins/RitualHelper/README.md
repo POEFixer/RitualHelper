@@ -69,11 +69,16 @@ slipping by.
 
 ## Known limits
 
-- The game's buttons are recognised by their English text ("Offer Tribute",
-  "Defer Item"), so the DEFER button needs an English game client. Highlights work
-  in every language.
-- The item list is in English. With another game language, tick rewards under
-  *In the open Favours window*: names are matched as the game writes them.
+- The game's buttons are recognised by their text: with POEFixer 371 or later in
+  every game language (the game's own "Defer Item" text in the game language, and
+  the other button under the reward grid as "Offer Tribute"); an older POEFixer
+  needs an English game client for the DEFER button. Highlights work in every
+  language.
+- The item list is in English. With POEFixer 371 or later rewards are matched by
+  their English name in every game language (a reward ticked earlier under the game's
+  own name still counts); an older POEFixer matches them as the game writes them, so
+  tick rewards under *In the open Favours window* there.
+- Unrevealed rewards are recognised by their item path in every game language.
 - If the Favours window or its buttons stop being recognised after a game patch, use
   *Write discovery dump* under Diagnostics and attach the file to your report.
 

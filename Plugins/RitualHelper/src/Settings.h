@@ -57,6 +57,10 @@ struct Settings {
 
     bool IsSelected(const std::string& name) const;
     void Select(const std::string& name, bool on);
+    // A reward of the open Favours window by its English name and the name the game shows
+    // (equal on an English client or an older host). Ticking stores the English name; unticking
+    // clears both, so a tick 1.5.8 stored under the game's name goes too.
+    void SelectReward(const std::string& english, const std::string& shown, bool on);
 
 private:
     std::string ToText() const;

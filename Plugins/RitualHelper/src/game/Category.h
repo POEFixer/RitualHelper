@@ -38,35 +38,7 @@ enum class Category : int {
 
 inline constexpr int kCategoryCount = static_cast<int>(Category::Count);
 
-inline const char* CategoryName(Category c) {
-    switch (c) {
-        case Category::Currency:        return "Currency";
-        case Category::Essence:         return "Essences";
-        case Category::Rune:            return "Runes";
-        case Category::SoulCore:        return "Soul Cores";
-        case Category::Catalyst:        return "Catalysts";
-        case Category::Delirium:        return "Delirium";
-        case Category::Incursion:       return "Incursion";
-        case Category::Idol:            return "Idols";
-        case Category::Ritual:          return "Omens";
-        case Category::VaultKey:        return "Vault Keys";
-        case Category::Fragment:        return "Fragments";
-        case Category::Abyss:           return "Abyss";
-        case Category::UncutGem:        return "Uncut Gems";
-        case Category::LineageGem:      return "Lineage Gems";
-        case Category::Verisium:        return "Verisium and Alloys";
-        case Category::Vaal:            return "Vaal";
-        case Category::Expedition:      return "Expedition";
-        case Category::UniqueWeapon:    return "Unique Weapons";
-        case Category::UniqueArmour:    return "Unique Armour";
-        case Category::UniqueAccessory: return "Unique Accessories";
-        case Category::UniqueJewel:     return "Unique Jewels";
-        case Category::UniqueFlask:     return "Unique Flasks and Charms";
-        case Category::UniqueMap:       return "Unique Tablets and Maps";
-        case Category::UniqueSanctum:   return "Unique Relics";
-        default:                        return "Other";
-    }
-}
+// The sections' names are texts of the settings tab (ui/SettingsUi.cpp, CategoryText).
 
 inline bool IsUniqueSection(Category c) {
     return static_cast<int>(c) >= static_cast<int>(Category::UniqueWeapon) &&
